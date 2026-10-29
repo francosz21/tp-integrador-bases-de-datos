@@ -1,76 +1,73 @@
-# 🧪 Classroom Stack: Python + Neo4j + MongoDB + Redis (Docker)
+# Sistema de Venta de Entradas y Recomendación de Eventos
 
-Este stack está pensado para levantar **Neo4j**, **MongoDB**, **Redis** y un contenedor de **Python + JupyterLab**
-con todas las librerías necesarias preinstaladas.
+Trabajo Práctico Integrador de **Bases de Datos 2026** — Licenciatura en Ciencia de Datos en Organizaciones, UNLP.
 
-## 🚀 Requisitos
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows/Mac) o Docker Engine (Linux)
-- `docker compose` (v2+)
+**Autores:** Lautaro Pennetta y Franco Suárez
 
-> En Windows, si usás WSL2, asegurate de que Docker Desktop tenga activado el backend WSL.
+## De qué se trata
 
-## 🧩 Servicios
-- **python**: JupyterLab en `http://localhost:8888` (sin token), con `neo4j`, `pymongo` y `redis` ya instalados.
-- **neo4j**: Browser en `http://localhost:7474`, Bolt en `bolt://localhost:7687`.
-- **mongo**: Servidor en `mongodb://<user>:<pass>@localhost:27017/`.
-- **redis**: Servidor en `redis://:<password>@localhost:6379`.
+Armamos el backend de datos de una plataforma de venta de entradas para recitales y eventos, usando tres bases de datos NoSQL desde Python. La idea del trabajo no era usar las tres porque sí, sino decidir qué parte del problema resuelve mejor cada una:
 
-## 🔒 Credenciales (editar en `.env` o usar `.env.example`)
-```
-NEO4J_PASSWORD=neo4j123
-MONGO_INITDB_ROOT_USERNAME=admin
-MONGO_INITDB_ROOT_PASSWORD=admin123
-REDIS_PASSWORD=redis123
-```
+| Base | Qué guarda | Por qué |
+|------|-----------|---------|
+| **MongoDB** | Usuarios, artistas, lugares, eventos y compras | Son los datos permanentes del sistema. Los separamos en colecciones y los relacionamos por identificadores. |
+| **Redis** | Sesiones, reservas temporales, ranking de búsquedas y caché | Son datos que vencen solos: la sesión dura 30 minutos, la reserva 10 y la caché 5. |
+| **Neo4j** | Amistades entre usuarios, artistas que sigue cada uno y artistas similares | Las recomendaciones dependen de recorrer relaciones (amigos de amigos, artistas parecidos), que es justo lo que resuelve bien un grafo. |
 
-> Para empezar rápido: copiá `.env.example` a `.env` sin cambios:
-> ```bash
-> cp .env.example .env
-> ```
+Las tres bases no se comunican entre sí: el notebook consulta una, toma los identificadores del resultado y con eso consulta la otra.
 
-## ▶️ Levantar el entorno
+## Qué incluye el notebook
+
+1. **Carga inicial** de las tres bases, con índices únicos en MongoDB y restricciones de unicidad en Neo4j.
+2. **Flujo de compra**: reservar entradas, confirmar la compra y cancelar la reserva. Probamos una compra exitosa, un pedido sin disponibilidad, una cancelación y una reserva vencida.
+3. **12 consultas** que combinan las tres bases (eventos por género, recomendaciones por amigos, gasto por usuario, búsquedas más populares, etc.).
+4. **Estadísticas con gráficos** en Matplotlib: seguidores por artista, recaudación por evento, entradas vendidas por lugar y géneros más buscados.
+5. **Modificaciones** que mantienen la consistencia entre bases: aumento de precios, cancelación de un evento con reembolso, eliminación de un usuario y de relaciones de amistad.
+
+## Algunas decisiones que tomamos
+
+- **La disponibilidad no se guarda, se calcula**: cupo − entradas vendidas (MongoDB) − reservas vigentes (Redis). Así, cuando una reserva vence, las entradas vuelven a estar disponibles sin tener que ejecutar nada.
+- **Cada compra guarda su precio**, para que un aumento posterior no cambie lo que ya pagaron los compradores anteriores.
+- **Una sola relación `AMIGO_DE` por pareja** en Neo4j, recorrida sin importar la dirección, para no duplicar amistades.
+- **Al eliminar un usuario conservamos sus compras** (desvinculadas) para no perder el historial de ventas.
+- Agregamos al dataset una usuaria, un artista, un lugar y un evento **sin actividad**, para comprobar que las estadísticas muestran también los casos en cero.
+
+Las decisiones y los problemas que encontramos están explicados en detalle en el informe.
+
+## Cómo ejecutarlo
+
+Se necesita [Docker Desktop](https://www.docker.com/products/docker-desktop/) (o Docker Engine con `docker compose` v2).
+
 ```bash
+cp .env.example .env
 docker compose up --build
 ```
-La primera vez tarda un poco (descarga imágenes e instala dependencias).
 
-## ⏹️ Apagar y borrar contenedores
-```bash
-docker compose down
-```
-Para borrar volúmenes (datos persistentes), agregá `-v`:
+Después abrir JupyterLab en `http://localhost:8888`, entrar a `notebooks/tp_integrador.ipynb` y ejecutar **Restart Kernel and Run All Cells**. La primera celda limpia las tres bases, así que se puede correr de cero las veces que haga falta.
+
+Si aparece un error de autenticación en MongoDB, probablemente los volúmenes se crearon antes del `.env`. Se soluciona con:
+
 ```bash
 docker compose down -v
+docker compose up --build
 ```
 
-## 📒 JupyterLab
-Abrí `http://localhost:8888`. Vas a encontrar ejemplos:
-- `notebooks/test_connections.ipynb` (o el script `test_connections.py`)
+## Estructura
 
-## 🧪 Pruebas rápidas desde Python
-Dentro de JupyterLab:
-```python
-# Neo4j
-from neo4j import GraphDatabase
-driver = GraphDatabase.driver("bolt://neo4j:7687", auth=("neo4j", "neo4j123"))
-with driver.session() as s:
-    s.run("CREATE (:City {name:'La Plata'})")
-    print(s.run("MATCH (n:City) RETURN count(n) AS c").single()["c"])
-
-# MongoDB
-from pymongo import MongoClient
-client = MongoClient("mongodb://admin:admin123@mongo:27017/")
-db = client["clase"]
-db.alumnos.insert_one({"nombre":"Edu","tema":"Grafos"})
-print(db.alumnos.count_documents({}))
-
-# Redis
-import redis
-r = redis.Redis(host="redis", port=6379, password="redis123", decode_responses=True)
-r.set("saludo","hola")
-print(r.get("saludo"))
+```
+├── docker-compose.yml        # Python + JupyterLab, MongoDB, Redis y Neo4j
+├── .env.example              # credenciales de ejemplo
+├── requirements.txt          # librerías de Python
+├── python/                   # Dockerfile del contenedor de Jupyter
+└── notebooks/
+    ├── tp_integrador.ipynb   # el trabajo práctico
+    └── test_connections.ipynb
 ```
 
-## Tips
-- Si `7474`/`7687`/`27017`/`6379`/`8888` están ocupados, cambiá los puertos publicados en `docker-compose.yml`.
-- Los datos **persisten** en los volúmenes docker (`neo4j_data`, `mongo_data`); para empezar limpio, hacé `docker compose down -v`.
+## Límites del trabajo
+
+El notebook corre las operaciones de a una, así que no contemplamos usuarios reservando exactamente al mismo tiempo, y no hay una transacción que abarque las tres bases a la vez: la consistencia se mantiene coordinando cada operación desde Python.
+
+---
+
+El entorno de Docker está basado en el stack provisto por la cátedra.
